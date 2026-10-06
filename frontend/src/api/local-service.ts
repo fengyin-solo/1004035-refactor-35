@@ -5,6 +5,13 @@ import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } f
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
 
+// 非开挖修复「发起复检」的边界统一在这一处：缺修复材料或施工日期为空先转「待补充」，
+// 复检中断保留上次有效状态并允许重试；重复发起由 runAction 里的同态守卫拦下，不会产生第二条复检。
+const RECHECK_MODULE = 'trenchless'
+const RECHECK_ACTION = '发起复检'
+const SUPPLEMENT_STATUS = '待补充'
+const RECHECK_REQUIRED_FIELDS = ['修复材料', '施工日期']
+
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
   if (!meta) {
@@ -43,6 +50,9 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
+  if (key === RECHECK_MODULE && action === RECHECK_ACTION) {
+    return runTrenchlessRecheck(meta, rows, index, action)
+  }
   const lastStatus = meta.statuses[meta.statuses.length - 1]
   const updated: EntryRow = {
     ...rows[index],
@@ -53,6 +63,44 @@ export function runAction(key: string, id: number, action: string): ActionResult
   const next = [...rows]
   next[index] = updated
   saveRows(key, next)
+  return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
+}
+
+// 非开挖修复的复检入口：缺资料进「待补充」，中断保留上次有效状态，正常流转的提示文案与通用路径一致。
+function runTrenchlessRecheck(meta: ModuleMeta, rows: EntryRow[], index: number, action: string): ActionResult {
+  const missing = RECHECK_REQUIRED_FIELDS.filter(
+    (field) => String(rows[index][field] ?? '').trim() === '',
+  )
+  const lastStatus = meta.statuses[meta.statuses.length - 1]
+  const target = missing.length > 0 ? SUPPLEMENT_STATUS : meta.actionTargets[action]
+  const updated: EntryRow = {
+    ...rows[index],
+    status: target,
+    pending: target !== lastStatus,
+    abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
+  }
+  const next = [...rows]
+  next[index] = updated
+  try {
+    saveRows(meta.key, next)
+  } catch {
+    // 写库失败按复检中断处理：回滚到上次有效状态，提示后允许重试。
+    try {
+      saveRows(meta.key, rows)
+    } catch {
+      // 存储不可用时至少保证状态不再往前推进。
+    }
+    return {
+      ok: false,
+      message: `${meta.entity}复检中断，已保留上次有效状态「${String(rows[index].status)}」，可重新发起复检`,
+    }
+  }
+  if (missing.length > 0) {
+    return {
+      ok: true,
+      message: `${meta.entity}缺少${missing.join('、')}，已转入「${SUPPLEMENT_STATUS}」，补齐后可重新发起复检`,
+    }
+  }
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 

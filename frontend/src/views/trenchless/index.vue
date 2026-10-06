@@ -65,6 +65,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条非开挖修复记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -84,12 +85,13 @@ import type { EntryRow } from '@/data/types'
 const meta = moduleMeta('trenchless')
 const columns = ["修复编号", "修复管段", "修复工艺", "修复材料", "施工日期", "修复长度", "修复效果", "修复状态"]
 const actions = ["安排施工", "确认完成", "发起复检"]
-const statuses = ["待施工", "施工中", "已完成", "待复检"]
+const statuses = ["待施工", "施工中", "已完成", "待补充", "待复检"]
 const stats = [{"label": "待施工修复", "value": 0}, {"label": "施工中修复", "value": 0}, {"label": "已完成修复", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const statusSummary = computed(() =>
@@ -114,11 +116,13 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
+  noticeMessage.value = ''
   const result = applyAction(meta.key, Number(row.id), action)
   if (!result.ok) {
     errorMessage.value = result.message
     return
   }
+  noticeMessage.value = result.message
   reload()
 }
 
