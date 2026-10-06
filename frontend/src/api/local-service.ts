@@ -1,5 +1,11 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import {
+  RECHECK_ACTIONS,
+  TRENCHLESS_KEY,
+  dispatchRecheckAction,
+  resetTrenchlessRechecks,
+} from '@/api/trenchless-recheck'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -30,6 +36,10 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+  // 非开挖复检相关动作统一走复检服务，各入口拿到同一结果结构与文案。
+  if (key === TRENCHLESS_KEY && (RECHECK_ACTIONS as readonly string[]).includes(action)) {
+    return dispatchRecheckAction(action, id) as ActionResult
+  }
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
@@ -58,6 +68,9 @@ export function runAction(key: string, id: number, action: string): ActionResult
 
 export function resetModule(key: string): PageResult {
   resetRows(key)
+  if (key === TRENCHLESS_KEY) {
+    resetTrenchlessRechecks()
+  }
   return listEntries(key)
 }
 
